@@ -1,0 +1,21 @@
+{
+    "name": "ds_adls_bronze_parquet",
+    "properties": {
+        "description": "Parameterized Parquet sink in the bronze zone. folder_path carries the dated partition for incremental loads.",
+        "linkedServiceName": { "referenceName": "ls_adls_lakehouse", "type": "LinkedServiceReference" },
+        "parameters": {
+            "folder_path": { "type": "string" }
+        },
+        "annotations": [],
+        "type": "Parquet",
+        "typeProperties": {
+            "location": {
+                "type": "AzureBlobFSLocation",
+                "fileSystem": "lakehouse",
+                "folderPath": { "value": "@dataset().folder_path", "type": "Expression" }
+            },
+            "compressionCodec": "snappy"
+        },
+        "schema": []
+    }
+}

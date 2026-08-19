@@ -1,0 +1,16 @@
+{
+    "name": "ls_azuresql_atliq",
+    "properties": {
+        "description": "Azure SQL OLTP source. Password is read from Key Vault - never stored in the pipeline JSON.",
+        "annotations": [],
+        "type": "AzureSqlDatabase",
+        "typeProperties": {
+            "connectionString": "Server=tcp:atliq-sql.database.windows.net,1433;Database=atliq_commerce;User ID=atliq_admin;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30",
+            "password": {
+                "type": "AzureKeyVaultSecret",
+                "store": { "referenceName": "ls_keyvault", "type": "LinkedServiceReference" },
+                "secretName": "atliq-sql-password"
+            }
+        }
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "name": "ls_adls_lakehouse",
+    "properties": {
+        "description": "ADLS Gen2 lakehouse. Authenticates with the data factory's own managed identity - no storage keys anywhere.",
+        "annotations": [],
+        "type": "AzureBlobFS",
+        "typeProperties": {
+            "url": "https://atliqlakehouse.dfs.core.windows.net"
+        }
+    }
+}

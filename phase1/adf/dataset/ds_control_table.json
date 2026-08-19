@@ -1,0 +1,11 @@
+{
+    "name": "ds_control_table",
+    "properties": {
+        "description": "etl.control_table - the metadata that drives the whole ingestion pipeline.",
+        "linkedServiceName": { "referenceName": "ls_azuresql_atliq", "type": "LinkedServiceReference" },
+        "annotations": [],
+        "type": "AzureSqlTable",
+        "schema": [],
+        "typeProperties": { "schema": "etl", "table": "control_table" }
+    }
+}

@@ -1,0 +1,14 @@
+{
+    "name": "ls_databricks",
+    "properties": {
+        "description": "Azure Databricks workspace running the Silver build and the dbt Gold job.",
+        "annotations": [],
+        "type": "AzureDatabricks",
+        "typeProperties": {
+            "domain": "https://adb-0000000000000000.0.azuredatabricks.net",
+            "authentication": "MSI",
+            "workspaceResourceId": "/subscriptions/<sub-id>/resourceGroups/rg-atliq-capstone/providers/Microsoft.Databricks/workspaces/atliq-databricks",
+            "existingClusterId": "0000-000000-xxxxxxxx"
+        }
+    }
+}

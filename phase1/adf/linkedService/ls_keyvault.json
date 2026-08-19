@@ -1,0 +1,11 @@
+{
+    "name": "ls_keyvault",
+    "properties": {
+        "description": "Key Vault holding the SQL admin password and any other pipeline secrets.",
+        "annotations": [],
+        "type": "AzureKeyVault",
+        "typeProperties": {
+            "baseUrl": "https://kv-atliq-capstone.vault.azure.net/"
+        }
+    }
+}
