@@ -1,0 +1,85 @@
+{
+    "name": "pl_nightly_master",
+    "properties": {
+        "description": "The nightly chain: Bronze ingest -> Silver build -> Gold build and test. Stages run in strict order because each reads what the previous one wrote. A failure anywhere stops the chain and raises an alert rather than serving a half-built warehouse.",
+        "activities": [
+            {
+                "name": "set_run_date",
+                "type": "SetVariable",
+                "dependsOn": [],
+                "typeProperties": {
+                    "variableName": "run_date",
+                    "value": { "value": "@formatDateTime(utcnow(),'yyyy-MM-dd')", "type": "Expression" }
+                }
+            },
+            {
+                "name": "exec_ingest_bronze",
+                "description": "Stage 1 - metadata-driven ingest into Bronze, advancing watermarks as each table succeeds.",
+                "type": "ExecutePipeline",
+                "dependsOn": [
+                    { "activity": "set_run_date", "dependencyConditions": ["Succeeded"] }
+                ],
+                "policy": { "secureInput": false },
+                "typeProperties": {
+                    "pipeline": { "referenceName": "pl_ingest_bronze_generic", "type": "PipelineReference" },
+                    "waitOnCompletion": true
+                }
+            },
+            {
+                "name": "nb_bronze_to_silver",
+                "description": "Stage 2 - clean and MERGE into Silver Delta tables. run_date tells the notebook exactly which Bronze batch to read.",
+                "type": "DatabricksNotebook",
+                "dependsOn": [
+                    { "activity": "exec_ingest_bronze", "dependencyConditions": ["Succeeded"] }
+                ],
+                "policy": { "timeout": "0.02:00:00", "retry": 1, "retryIntervalInSeconds": 120 },
+                "typeProperties": {
+                    "notebookPath": "/Repos/atliq/phase1/databricks/01_bronze_to_silver",
+                    "baseParameters": {
+                        "run_date": { "value": "@variables('run_date')", "type": "Expression" },
+                        "storage_account": "atliqlakehouse"
+                    }
+                },
+                "linkedServiceName": { "referenceName": "ls_databricks", "type": "LinkedServiceReference" }
+            },
+            {
+                "name": "nb_dbt_build_gold",
+                "description": "Stage 3 - dbt build: rebuild the star schema from Silver and run every test. Tests run as part of the build, so bad data fails the pipeline instead of quietly reaching the dashboard.",
+                "type": "DatabricksNotebook",
+                "dependsOn": [
+                    { "activity": "nb_bronze_to_silver", "dependencyConditions": ["Succeeded"] }
+                ],
+                "policy": { "timeout": "0.01:00:00", "retry": 0 },
+                "typeProperties": {
+                    "notebookPath": "/Repos/atliq/phase1/databricks/03_run_dbt_build"
+                },
+                "linkedServiceName": { "referenceName": "ls_databricks", "type": "LinkedServiceReference" }
+            },
+            {
+                "name": "web_alert_on_failure",
+                "description": "Any upstream failure lands here. A silently stale dashboard is worse than a visibly broken one, so a failed run has to notify a human.",
+                "type": "WebActivity",
+                "dependsOn": [
+                    { "activity": "exec_ingest_bronze", "dependencyConditions": ["Failed"] },
+                    { "activity": "nb_bronze_to_silver", "dependencyConditions": ["Failed"] },
+                    { "activity": "nb_dbt_build_gold", "dependencyConditions": ["Failed"] }
+                ],
+                "policy": { "timeout": "0.00:05:00", "retry": 1 },
+                "typeProperties": {
+                    "url": "https://<your-logic-app-or-teams-webhook>",
+                    "method": "POST",
+                    "body": {
+                        "value": "@concat('{\"pipeline\":\"pl_nightly_master\",\"run_id\":\"', pipeline().RunId, '\",\"run_date\":\"', variables('run_date'), '\",\"status\":\"FAILED\"}')",
+                        "type": "Expression"
+                    },
+                    "headers": { "Content-Type": "application/json" }
+                }
+            }
+        ],
+        "variables": {
+            "run_date": { "type": "String" }
+        },
+        "folder": { "name": "atliq/orchestration" },
+        "annotations": ["phase1", "nightly", "master"]
+    }
+}
