@@ -1,0 +1,267 @@
+{
+    "name": "pl_ingest_bronze_generic",
+    "properties": {
+        "description": "ONE generic, metadata-driven ingestion pipeline. It has no knowledge of any specific table - everything it does is read from etl.control_table at runtime. Adding a sixth source table means inserting one row in that table, not editing this pipeline.",
+        "activities": [
+            {
+                "name": "set_run_start_at",
+                "description": "Capture the run timestamp ONCE at the start. Each watermark advances to this value, never to 'now at the end of the run' - otherwise rows that arrive while the pipeline is running would be skipped forever.",
+                "type": "SetVariable",
+                "dependsOn": [],
+                "typeProperties": {
+                    "variableName": "run_start_at",
+                    "value": { "value": "@utcnow()", "type": "Expression" }
+                }
+            },
+            {
+                "name": "lk_control_table",
+                "description": "Read the ingestion metadata: what to load, how, and from which watermark.",
+                "type": "Lookup",
+                "dependsOn": [
+                    { "activity": "set_run_start_at", "dependencyConditions": ["Succeeded"] }
+                ],
+                "policy": { "timeout": "0.00:10:00", "retry": 2, "retryIntervalInSeconds": 30 },
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "SELECT table_name, source_schema, load_type, watermark_column, last_loaded_at FROM etl.control_table ORDER BY table_name"
+                    },
+                    "dataset": { "referenceName": "ds_control_table", "type": "DatasetReference" },
+                    "firstRowOnly": false
+                }
+            },
+            {
+                "name": "fe_each_source_table",
+                "description": "Loop over every row of the control table. isSequential=false so independent tables copy in parallel.",
+                "type": "ForEach",
+                "dependsOn": [
+                    { "activity": "lk_control_table", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "items": { "value": "@activity('lk_control_table').output.value", "type": "Expression" },
+                    "isSequential": false,
+                    "batchCount": 4,
+                    "activities": [
+                        {
+                            "name": "if_incremental",
+                            "description": "The only branch in the pipeline. Everything else is driven by parameters.",
+                            "type": "IfCondition",
+                            "dependsOn": [],
+                            "typeProperties": {
+                                "expression": {
+                                    "value": "@equals(item().load_type, 'incremental')",
+                                    "type": "Expression"
+                                },
+                                "ifTrueActivities": [
+                                    {
+                                        "name": "cp_incremental_to_bronze",
+                                        "description": "Copy only rows newer than the stored watermark into a dated Bronze folder. A same-day retry overwrites that day's folder, so retries never create duplicate batches.",
+                                        "type": "Copy",
+                                        "dependsOn": [],
+                                        "policy": { "timeout": "0.02:00:00", "retry": 2, "retryIntervalInSeconds": 60 },
+                                        "typeProperties": {
+                                            "source": {
+                                                "type": "AzureSqlSource",
+                                                "sqlReaderQuery": {
+                                                    "value": "SELECT * FROM [@{item().source_schema}].[@{item().table_name}] WHERE [@{item().watermark_column}] > '@{item().last_loaded_at}' AND [@{item().watermark_column}] <= '@{variables('run_start_at')}'",
+                                                    "type": "Expression"
+                                                },
+                                                "queryTimeout": "02:00:00",
+                                                "partitionOption": "None"
+                                            },
+                                            "sink": {
+                                                "type": "ParquetSink",
+                                                "storeSettings": { "type": "AzureBlobFSWriteSettings" },
+                                                "formatSettings": { "type": "ParquetWriteSettings" }
+                                            },
+                                            "enableStaging": false,
+                                            "validateDataConsistency": false
+                                        },
+                                        "inputs": [
+                                            {
+                                                "referenceName": "ds_azuresql_generic",
+                                                "type": "DatasetReference",
+                                                "parameters": {
+                                                    "schema_name": { "value": "@item().source_schema", "type": "Expression" },
+                                                    "table_name": { "value": "@item().table_name", "type": "Expression" }
+                                                }
+                                            }
+                                        ],
+                                        "outputs": [
+                                            {
+                                                "referenceName": "ds_adls_bronze_parquet",
+                                                "type": "DatasetReference",
+                                                "parameters": {
+                                                    "folder_path": {
+                                                        "value": "bronze/@{item().table_name}/ingest_date=@{formatDateTime(variables('run_start_at'),'yyyy-MM-dd')}",
+                                                        "type": "Expression"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "sp_advance_watermark",
+                                        "description": "Advance the watermark ONLY after the copy succeeded. If the copy fails, the watermark stays put and the next run re-reads the same range - no silent data loss.",
+                                        "type": "SqlServerStoredProcedure",
+                                        "dependsOn": [
+                                            { "activity": "cp_incremental_to_bronze", "dependencyConditions": ["Succeeded"] }
+                                        ],
+                                        "policy": { "timeout": "0.00:10:00", "retry": 2, "retryIntervalInSeconds": 30 },
+                                        "typeProperties": {
+                                            "storedProcedureName": "[etl].[usp_update_watermark]",
+                                            "storedProcedureParameters": {
+                                                "table_name": {
+                                                    "value": { "value": "@item().table_name", "type": "Expression" },
+                                                    "type": "String"
+                                                },
+                                                "run_start_at": {
+                                                    "value": { "value": "@variables('run_start_at')", "type": "Expression" },
+                                                    "type": "DateTime"
+                                                }
+                                            }
+                                        },
+                                        "linkedServiceName": { "referenceName": "ls_azuresql_atliq", "type": "LinkedServiceReference" }
+                                    }
+                                ],
+                                "ifFalseActivities": [
+                                    {
+                                        "name": "cp_full_to_bronze",
+                                        "description": "Small reference tables: reload the whole thing and overwrite the snapshot. Cheaper than tracking changes at this size.",
+                                        "type": "Copy",
+                                        "dependsOn": [],
+                                        "policy": { "timeout": "0.02:00:00", "retry": 2, "retryIntervalInSeconds": 60 },
+                                        "typeProperties": {
+                                            "source": {
+                                                "type": "AzureSqlSource",
+                                                "sqlReaderQuery": {
+                                                    "value": "SELECT * FROM [@{item().source_schema}].[@{item().table_name}]",
+                                                    "type": "Expression"
+                                                },
+                                                "queryTimeout": "02:00:00"
+                                            },
+                                            "sink": {
+                                                "type": "ParquetSink",
+                                                "storeSettings": {
+                                                    "type": "AzureBlobFSWriteSettings",
+                                                    "copyBehavior": "PreserveHierarchy"
+                                                },
+                                                "formatSettings": { "type": "ParquetWriteSettings" }
+                                            },
+                                            "enableStaging": false
+                                        },
+                                        "inputs": [
+                                            {
+                                                "referenceName": "ds_azuresql_generic",
+                                                "type": "DatasetReference",
+                                                "parameters": {
+                                                    "schema_name": { "value": "@item().source_schema", "type": "Expression" },
+                                                    "table_name": { "value": "@item().table_name", "type": "Expression" }
+                                                }
+                                            }
+                                        ],
+                                        "outputs": [
+                                            {
+                                                "referenceName": "ds_adls_bronze_parquet",
+                                                "type": "DatasetReference",
+                                                "parameters": {
+                                                    "folder_path": {
+                                                        "value": "bronze/@{item().table_name}",
+                                                        "type": "Expression"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "name": "sp_advance_watermark_full",
+                                        "description": "Full loads still stamp last_loaded_at so the control table records when each source was last refreshed.",
+                                        "type": "SqlServerStoredProcedure",
+                                        "dependsOn": [
+                                            { "activity": "cp_full_to_bronze", "dependencyConditions": ["Succeeded"] }
+                                        ],
+                                        "policy": { "timeout": "0.00:10:00", "retry": 2, "retryIntervalInSeconds": 30 },
+                                        "typeProperties": {
+                                            "storedProcedureName": "[etl].[usp_update_watermark]",
+                                            "storedProcedureParameters": {
+                                                "table_name": {
+                                                    "value": { "value": "@item().table_name", "type": "Expression" },
+                                                    "type": "String"
+                                                },
+                                                "run_start_at": {
+                                                    "value": { "value": "@variables('run_start_at')", "type": "Expression" },
+                                                    "type": "DateTime"
+                                                }
+                                            }
+                                        },
+                                        "linkedServiceName": { "referenceName": "ls_azuresql_atliq", "type": "LinkedServiceReference" }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "fe_external_csv_files",
+                "description": "The two external CSVs are not in the OLTP database, so they get their own short loop. Same sink convention, full overwrite each night.",
+                "type": "ForEach",
+                "dependsOn": [
+                    { "activity": "set_run_start_at", "dependencyConditions": ["Succeeded"] }
+                ],
+                "typeProperties": {
+                    "items": {
+                        "value": "@createArray('supplier_price_list','marketing_spend')",
+                        "type": "Expression"
+                    },
+                    "isSequential": false,
+                    "batchCount": 2,
+                    "activities": [
+                        {
+                            "name": "cp_csv_to_bronze",
+                            "type": "Copy",
+                            "dependsOn": [],
+                            "policy": { "timeout": "0.01:00:00", "retry": 2, "retryIntervalInSeconds": 60 },
+                            "typeProperties": {
+                                "source": {
+                                    "type": "DelimitedTextSource",
+                                    "storeSettings": { "type": "AzureBlobFSReadSettings", "recursive": false },
+                                    "formatSettings": { "type": "DelimitedTextReadSettings" }
+                                },
+                                "sink": {
+                                    "type": "ParquetSink",
+                                    "storeSettings": { "type": "AzureBlobFSWriteSettings" },
+                                    "formatSettings": { "type": "ParquetWriteSettings" }
+                                },
+                                "enableStaging": false
+                            },
+                            "inputs": [
+                                {
+                                    "referenceName": "ds_adls_csv_landing",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "file_name": { "value": "@concat(item(),'.csv')", "type": "Expression" }
+                                    }
+                                }
+                            ],
+                            "outputs": [
+                                {
+                                    "referenceName": "ds_adls_bronze_parquet",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "folder_path": { "value": "bronze/@{item()}", "type": "Expression" }
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        ],
+        "variables": {
+            "run_start_at": { "type": "String" }
+        },
+        "folder": { "name": "atliq/ingest" },
+        "annotations": ["phase1", "bronze", "metadata-driven"]
+    }
+}
