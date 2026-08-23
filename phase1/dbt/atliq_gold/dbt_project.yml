@@ -1,0 +1,39 @@
+name: 'atliq_gold'
+version: '1.0.0'
+config-version: 2
+
+profile: 'atliq_gold'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  # dim_date is generated wide enough to cover the earliest customer signup
+  # through the end of next year, so no order date ever falls outside it.
+  date_start: '2024-01-01'
+  date_end: '2026-12-31'
+  # Revenue definition, stated once and used everywhere:
+  # Cancelled orders are never revenue. Returned orders are counted separately
+  # so the dashboard can show gross and net side by side.
+  excluded_statuses: ['Cancelled']
+
+models:
+  atliq_gold:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: view
+      +schema: staging
+    gold:
+      +materialized: table
+      # External tables at a known ADLS path so Fabric can read them through a
+      # OneLake shortcut with no data copy.
+      +location_root: 'abfss://lakehouse@atliqlakehouse.dfs.core.windows.net/gold'

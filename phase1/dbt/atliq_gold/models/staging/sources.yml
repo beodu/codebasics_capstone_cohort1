@@ -1,0 +1,45 @@
+version: 2
+
+sources:
+  - name: silver
+    description: >
+      Cleaned, de-duplicated Delta tables in Unity Catalog, produced by the
+      Databricks Bronze-to-Silver job. Gold never reads Bronze directly.
+    catalog: atliq
+    schema: silver
+
+    # Freshness turns "the dashboard looks stale" into a build failure.
+    loaded_at_field: updated_at
+    freshness:
+      warn_after: {count: 26, period: hour}
+      error_after: {count: 48, period: hour}
+
+    tables:
+      - name: customers
+        columns:
+          - name: customer_id
+            tests: [unique, not_null]
+      - name: products
+        columns:
+          - name: product_id
+            tests: [unique, not_null]
+      - name: orders
+        columns:
+          - name: order_id
+            tests: [unique, not_null]
+      - name: order_items
+        loaded_at_field: created_at
+        columns:
+          - name: order_item_id
+            tests: [unique, not_null]
+      - name: payments
+        columns:
+          - name: payment_id
+            tests: [unique, not_null]
+      - name: supplier_price_list
+        freshness: null
+        columns:
+          - name: product_id
+            tests: [unique, not_null]
+      - name: marketing_spend
+        freshness: null

@@ -1,0 +1,23 @@
+# Copy to ~/.dbt/profiles.yml. Never commit a filled-in copy — no secrets in Git.
+# Every value comes from an environment variable so the same project runs
+# unchanged on a laptop and in CI.
+atliq_gold:
+  target: dev
+  outputs:
+    dev:
+      type: databricks
+      host: "{{ env_var('DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      catalog: atliq
+      schema: gold
+      threads: 4
+
+    ci:
+      type: databricks
+      host: "{{ env_var('DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DATABRICKS_TOKEN') }}"
+      catalog: atliq
+      schema: ci          # throwaway schema so CI never touches production Gold
+      threads: 4
