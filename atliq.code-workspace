@@ -1,0 +1,31 @@
+{
+  "folders": [
+    { "name": "AtliQ Commerce", "path": "." }
+  ],
+  "settings": {
+    "mssql.connections": [
+      {
+        "server": "localhost,1433",
+        "database": "atliq_commerce",
+        "authenticationType": "SqlLogin",
+        "user": "sa",
+        "password": "",
+        "profileName": "AtliQ OLTP",
+        "savePassword": true,
+        "trustServerCertificate": true,
+        "encrypt": "mandatory"
+      },
+      {
+        "server": "localhost,1433",
+        "database": "atliq_dw",
+        "authenticationType": "SqlLogin",
+        "user": "sa",
+        "password": "",
+        "profileName": "AtliQ Warehouse",
+        "savePassword": true,
+        "trustServerCertificate": true,
+        "encrypt": "mandatory"
+      }
+    ]
+  }
+}
