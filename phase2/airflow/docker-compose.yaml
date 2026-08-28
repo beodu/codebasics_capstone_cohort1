@@ -1,0 +1,51 @@
+# Minimal local Airflow for the streaming ops DAG.
+# Start with:  docker compose up -d      UI: http://localhost:8080 (airflow/airflow)
+#
+# The Databricks provider is installed via _PIP_ADDITIONAL_REQUIREMENTS so the
+# DAG's operators resolve. After changing it: docker compose down && docker compose up -d
+---
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.2
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-databricks
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db migrate && airflow users create --username airflow --password airflow
+        --firstname a --lastname b --role Admin --email admin@example.com
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: always
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
