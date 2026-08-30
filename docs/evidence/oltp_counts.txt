@@ -1,0 +1,15 @@
+# OLTP counts (atliq_commerce)
+
+customers: 40
+products: 25
+orders: 308
+order_items: 804
+payments: 253
+
+# etl.control_table
+
+customers: full  wm=None  last=2026-08-30 16:16:43
+order_items: incremental  wm=created_at  last=2026-08-30 16:16:43
+orders: incremental  wm=updated_at  last=2026-08-30 16:16:43
+payments: incremental  wm=updated_at  last=2026-08-30 16:16:43
+products: full  wm=None  last=2026-08-30 16:16:43

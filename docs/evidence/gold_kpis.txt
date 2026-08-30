@@ -1,0 +1,14 @@
+# Gold KPIs (atliq_dw)
+
+orders: 308
+line_items: 804
+gross_revenue: 2132645.00
+net_revenue: 1802376.00
+
+# MERGE proof (13 orders arrived, 8 new — 5 updated in place)
+silver.orders = 308 after 8 inserts + 5 status changes
+
+# Stream
+stream.events_raw: 500
+stream.events: 400
+stream.revenue_windows: 8

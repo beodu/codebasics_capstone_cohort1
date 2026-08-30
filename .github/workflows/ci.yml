@@ -1,0 +1,88 @@
+name: dbt-ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  dbt-build:
+    name: Build and test Gold in an isolated CI schema
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    defaults:
+      run:
+        working-directory: phase1/dbt/atliq_gold
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dbt
+        run: pip install dbt-databricks==1.8.*
+
+      - name: Set up profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cp profiles.example.yml ~/.dbt/profiles.yml
+
+      - name: dbt deps
+        run: dbt deps
+
+      # Compile first: catches broken refs and Jinja errors in seconds, before
+      # spending warehouse time on a build that was never going to work.
+      - name: dbt compile
+        run: dbt compile --target ci
+
+      # Builds into catalog atliq, schema `ci` - a throwaway schema, so a bad PR
+      # can never corrupt production Gold.
+      - name: dbt build (models + tests)
+        run: dbt build --target ci
+
+      - name: Upload dbt artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-target
+          path: phase1/dbt/atliq_gold/target/
+          retention-days: 7
+
+  lint:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install ruff
+      - name: Syntax and style check
+        run: ruff check --select E9,F63,F7,F82 src tests run.py phase1 phase2
+
+  json-validate:
+    name: Validate ADF JSON exports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every ADF definition
+        run: |
+          python - <<'PY'
+          import json, glob, sys
+          bad = []
+          for f in glob.glob('phase1/adf/**/*.json', recursive=True):
+              try:
+                  json.load(open(f))
+                  print('ok  ', f)
+              except Exception as e:
+                  bad.append((f, e))
+          if bad:
+              for f, e in bad:
+                  print('FAIL', f, e, file=sys.stderr)
+              sys.exit(1)
+          PY
