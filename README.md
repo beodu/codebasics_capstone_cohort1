@@ -1,4 +1,4 @@
-# AtliQ Commerce — Data Engineering Capstone
+# AtliQ Commerce — Data Engineering Capstone Project
 
 Codebasics DE bootcamp, Phase 1 + Phase 2.
 
